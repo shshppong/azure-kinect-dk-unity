@@ -13,48 +13,94 @@ public class DebugRenderer : MonoBehaviour
     GameObject[] debugObjects;
     public Renderer renderer;
 
+    private void Awake()
+    {
+        if (renderer == null)
+            renderer = GetComponent<Renderer>();
+    }
+
     private void OnEnable()
     {
-        this.device = Device.Open(0);
-        var config = new DeviceConfiguration
+        string stage = "opening device 0";
+        try
         {
-            ColorResolution = ColorResolution.r720p,
-            ColorFormat = ImageFormat.ColorBGRA32,
-            DepthMode = DepthMode.NFOV_Unbinned
-        };
-        device.StartCameras(config);
+            this.device = Device.Open(0);
+            var config = new DeviceConfiguration
+            {
+                ColorResolution = ColorResolution.r720p,
+                ColorFormat = ImageFormat.ColorBGRA32,
+                DepthMode = DepthMode.NFOV_Unbinned
+            };
+            stage = "starting cameras";
+            device.StartCameras(config);
 
-        var calibration = device.GetCalibration(config.DepthMode, config.ColorResolution);
-        this.tracker = BodyTracker.Create(calibration);
-        debugObjects = new GameObject[(int)JointId.Count];
-        for (var i = 0; i < (int)JointId.Count; i++)
+            stage = "reading calibration";
+            var calibration = device.GetCalibration(config.DepthMode, config.ColorResolution);
+            stage = "creating body tracker";
+            var modelPath = System.IO.Path.Combine(Application.dataPath, "Plugins", "dnn_model_2_0_op11.onnx");
+            if (!System.IO.File.Exists(modelPath))
+                throw new System.IO.FileNotFoundException("Azure Kinect body tracking model not found.", modelPath);
+            this.tracker = BodyTracker.Create(calibration, modelPath);
+            stage = "creating joint objects";
+            debugObjects = new GameObject[(int)JointId.Count];
+            for (var i = 0; i < (int)JointId.Count; i++)
+            {
+                var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                cube.name = Enum.GetName(typeof(JointId), i);
+                cube.transform.localScale = Vector3.one * 0.4f;
+                debugObjects[i] = cube;
+            }
+            Debug.Log("Azure Kinect cameras and body tracker started.", this);
+        }
+        catch (Exception exception)
         {
-            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            cube.name = Enum.GetName(typeof(JointId), i);
-            cube.transform.localScale = Vector3.one * 0.4f;
-            debugObjects[i] = cube;
+            Debug.LogError($"Azure Kinect initialization failed while {stage}: {exception}", this);
+            enabled = false;
+            ReleaseResources();
         }
     }
 
     private void OnDisable()
     {
-        if (tracker != null)
+        ReleaseResources();
+    }
+
+    private void ReleaseResources()
+    {
+        try
         {
-            tracker.Dispose();
+            if (tracker != null)
+            {
+                tracker.Dispose();
+                tracker = null;
+            }
         }
-        if (device != null)
+        finally
         {
-            device.Dispose();
+            if (device != null)
+            {
+                device.Dispose();
+                device = null;
+            }
+            if (debugObjects != null)
+            {
+                foreach (var obj in debugObjects)
+                    if (obj != null) Destroy(obj);
+                debugObjects = null;
+            }
         }
     }
 
     void Update()
     {
+        if (device == null || tracker == null)
+            return;
+
         using (Capture capture = device.GetCapture())
         {
             tracker.EnqueueCapture(capture);
             var color = capture.Color;
-            if (color.WidthPixels > 0)
+            if (color != null && color.WidthPixels > 0 && renderer != null)
             {
                 Texture2D tex = new Texture2D(color.WidthPixels, color.HeightPixels, TextureFormat.BGRA32, false);
                 tex.LoadRawTextureData(color.GetBufferCopy());

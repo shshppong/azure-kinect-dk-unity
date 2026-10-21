@@ -13,6 +13,21 @@ namespace Microsoft.Azure.Kinect.Sensor
 
         public SensorOrientation sensor_orientation;
 
-        public int cpu_only_mode;
+        // k4abt_tracker_configuration_t layout for Body Tracking SDK 1.1.x.
+        public TrackerProcessingMode processing_mode;
+
+        public int gpu_device_id;
+
+        [MarshalAs(UnmanagedType.LPStr)]
+        public string model_path;
+    }
+
+    public enum TrackerProcessingMode
+    {
+        Gpu = 0,
+        Cpu = 1,
+        Cuda = 2,
+        TensorRT = 3,
+        DirectML = 4
     }
 }
